@@ -1,0 +1,61 @@
+version: "3.9"
+
+services:
+  # ── PostgreSQL 17 ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    container_name: zatrano_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB:       ${DB_NAME:-zatrano}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-zatrano}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── MailHog (local SMTP + web UI) ──────────────────────────────────────────
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: zatrano_mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI → http://localhost:8025
+    logging:
+      driver: "none"
+
+  # ── ZBE API Server ─────────────────────────────────────────────────────────
+  zbe:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zatrano_zbe
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DB_HOST:    postgres
+      DB_PORT:    "5432"
+      SMTP_HOST:  mailhog
+      SMTP_PORT:  "1025"
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local
